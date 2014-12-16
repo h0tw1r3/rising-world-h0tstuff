@@ -1,0 +1,9 @@
+<Lua-Script>
+  <Name>h0tstuff</Name>
+  <Description>Some stuff to enhance playing with others.</Description>
+  <File>script.lua</File>
+  <Author>h0tw1r3</Author>
+  <Team>ClarkMania</Team>
+  <Website>github.com/h0tw1r3/rising-world-h0tstuff</Website>
+  <License>AGPL</License>
+</Lua-Script>
