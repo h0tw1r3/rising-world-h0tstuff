@@ -74,7 +74,7 @@ function onPlayerCommand(event)
 	elseif cmd[1] == "/unban" then
             if not event.player:isAdmin() then return msgAccessDenied(event.player) end
             if not cmd[2] then return msgInvalidUsage(event.player) end
-            unban(cmd[2])
+            unban(cmd[2], event.player)
         elseif cmd[1] == "/setmotd" then
             if not event.player:isAdmin() then return msgAccessDenied(event.player) end
             if not cmd[2] then return msgInvalidUsage(event.player) end
@@ -110,9 +110,14 @@ function onPlayerCommand(event)
 end
 
 function decoratePlayerName(player)
-    local str = "[#CCCCCC]"..player:getPlayerName()
-    if player:isAdmin() then
-        str = str.."[#FF0000] (admin)"
+    local str = "[#CCCCCC]"
+    if type(player) == "string" then
+        str = str..player
+    else
+        str = str..player:getPlayerName()
+        if player:isAdmin() then
+            str = str.."[#FF0000] (admin)"
+        end
     end
 
     return str.."[#FFFFFF]"
@@ -197,9 +202,10 @@ function checkban(player)
     result:close()
 end
 
-function unban(playername)
-    --- TODO: confirm player is banned and return a response to admin
+function unban(playername, adminPlayer)
+    --- TODO: confirm player is banned
     database:queryupdate("DELETE FROM `banlist` WHERE `playername` = '".. playername .."' COLLATE NOCASE;")
+    server:brodcastTextMessage(timePrefix{text="[#FF0000]** ".. decoratePlayerName(playername) .." ban removed by ".. decoratePlayerName(adminPlayer)})
 end
 
 function ban(playername, duration, reason, adminPlayer)
@@ -212,6 +218,8 @@ function ban(playername, duration, reason, adminPlayer)
     local banPlayer = findOnlinePlayerByName(playername)
     if banPlayer then
         checkban(banPlayer)
+    else
+        server:brodcastTextMessage(timePrefix{text="[#FF0000]** ".. decoratePlayerName(playername) .." banned by ".. decoratePlayerName(adminPlayer)})
     end
 end
 
