@@ -9,6 +9,8 @@ motd = { time=0, message=nil }
 motd_timer = nil
 welcome_message = nil
 
+playersOnline = {}
+
 -- Didn't use the builtin yell api because it's not customizable
 yellLabel = Gui:createLabel("", 0.99, 0.99);
 yellLabel:setFontColor(0xCCFF00FF);
@@ -21,14 +23,20 @@ function onPlayerSpawn(event)
     event.player:addGuiElement(yellLabel)
     broadcastPlayerStatus(event.player, " joined the world")
     showWelcome(event.player);
+    -- check for players that were offline when banned
+    checkban(event.player)
 end
 
 function onPlayerConnect(event)
     broadcastPlayerStatus(event.player, " is connecting")
+    -- I should be able to set value to event.player, but banning myself is throwing errors so no way to really test :(
+    --- need a second account to really test this stuff.
+    playersOnline[string.lower(event.player:getPlayerName())] = event.player:getPlayerID()
 end
 
 function onPlayerDisconnect(event)
-    event.player:removeGuiElement(yellLabel);
+    -- TODO: compact the table
+    playersOnline[string.lower(event.player:getPlayerName())] = nil
     broadcastPlayerStatus(event.player, " disconnected")
 end
 
@@ -50,11 +58,23 @@ function onPlayerCommand(event)
     
         if cmd[1] == "/help" then
             if event.player:isAdmin() then
+                event.player:sendTextMessage("[#00FFCC]/ban [#00CC88]<player> <duration in minutes, -1 is permenant> <reason>");
+                event.player:sendTextMessage("[#00FFCC]/unban [#00CC88]<player>");
                 event.player:sendTextMessage("[#00FFCC]/setWelcome [#00CC88]<message>");
                 event.player:sendTextMessage("[#00FFCC]/setMotd [#00CC88]<message>");
                 event.player:sendTextMessage("[#00FFCC]/yell [#00CC88]<message>");
             end
             event.player:sendTextMessage("[#00FFCC]/whisper [#00CC88]<player> <message>");
+        elseif cmd[1] == "/ban" then
+            if not event.player:isAdmin() then return msgAccessDenied(event.player) end
+            if not cmd[2] then return msgInvalidUsage(event.player) end
+            local args = explode(" ", cmd[2], 3)
+	    if not args[1] or not args[2] or not args[3] then return msgInvalidUsage(event.player) end
+	    ban(args[1], args[2], args[3], event.player)
+	elseif cmd[1] == "/unban" then
+            if not event.player:isAdmin() then return msgAccessDenied(event.player) end
+            if not cmd[2] then return msgInvalidUsage(event.player) end
+            unban(cmd[2])
         elseif cmd[1] == "/setmotd" then
             if not event.player:isAdmin() then return msgAccessDenied(event.player) end
             if not cmd[2] then return msgInvalidUsage(event.player) end
@@ -127,6 +147,7 @@ function showWelcome(player)
     if result:next() then
         player:sendTextMessage(timePrefix{text="[#FFA500]** ".. result:getString("value")})
     end
+    result:close()
 end
 
 function setMotd(msg)
@@ -143,6 +164,7 @@ function showMotd()
     if motd.time > 0 then
         server:brodcastTextMessage(timePrefix{time=motd.time, text="[#FFA500]** ".. motd.message})
     end
+    result:close()
 end
 
 function timePrefix(opts)
@@ -150,6 +172,59 @@ function timePrefix(opts)
         opts.time = os.time()
     end
     return os.date("%x %X", opts.time) .." ".. opts.text
+end
+
+-- checked on join
+function checkban(player)
+    local result = database:query("SELECT * FROM `banlist` WHERE `playername` = '".. player:getPlayerName() .."' AND (`applied_at` < 0 OR (`applied_at` + `duration`) > ".. os.time() .." OR `duration` < 0) COLLATE NOCASE;")
+    if result:next() then
+	duration = (result:getInt("duration") / 60)
+	reason = result:getString("reason")
+
+        local message = " banned by ".. result:getString("admin")
+        if duration > 0 then
+            message = message .." for ".. duration .." minutes"
+        else
+            message = message .." permenantly"
+        end
+	message = message .." (".. reason ..")"
+        broadcastPlayerStatus(player, message)
+	if result:getInt("applied_at") < 0 then
+	    database:queryupdate("UPDATE `banlist` SET `applied_at` = ".. os.time() .." WHERE `id` = ".. result:getString("id") ..";")
+	end
+        setTimer(function() player:ban(reason, duration); end, 1, 1);
+    end
+    result:close()
+end
+
+function unban(playername)
+    --- TODO: confirm player is banned and return a response to admin
+    database:queryupdate("DELETE FROM `banlist` WHERE `playername` = '".. playername .."' COLLATE NOCASE;")
+end
+
+function ban(playername, duration, reason, adminPlayer)
+    --- Queue ban for next login attempt
+    if duration == 0 then duration = 1 end
+    database:queryupdate("INSERT INTO `banlist` (`playername`, `admin`, `serial`, `date`, `duration`, `reason`) VALUES ('".. playername .."', '".. adminPlayer:getPlayerName() .."', '', ".. os.time() ..", ".. (duration * 60) ..", '".. reason .."');")
+
+    -- Ban immediately if online
+    --- Don't use server:findPlayerByName because it's currently case sensitive
+    local banPlayer = findOnlinePlayerByName(playername)
+    if banPlayer then
+        checkban(banPlayer)
+    end
+end
+
+function findOnlinePlayerByName(playername)
+    local lname = string.lower(playername)
+    if playersOnline[lname] then
+        if server:findPlayerByID(playersOnline[lname]) then
+            return server:findPlayerByID(playersOnline[i])
+        else
+            -- actually shouldn't happen, see onPlayerDisconnect
+            playersOnline[lname] = nil
+        end
+    end
 end
 
 addEvent("PlayerSpawn", onPlayerSpawn);
@@ -164,6 +239,7 @@ function onEnable()
 
     database:queryupdate("CREATE TABLE IF NOT EXISTS `motd` (`ID` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `time` INTEGER, `message` VARCHAR);");
     database:queryupdate("CREATE TABLE IF NOT EXISTS `settings` (`key` PRIMARY KEY NOT NULL, `value` VARCHAR);");
+    database:queryupdate("CREATE TABLE IF NOT EXISTS `banlist` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `playername` NOT NULL, `admin` VARCHAR, `serial` VARCHAR, `date` INTEGER NOT NULL, `duration` LONG DEFAULT -1, `reason` VARCHAR, `applied_at` BOOLEAN DEFAULT 0);");
 
     -- Broadcast motd every 60 minutes
     motd_timer = setTimer(function() showMotd(); end, 3600, -1);
