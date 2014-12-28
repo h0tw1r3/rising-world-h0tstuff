@@ -20,7 +20,6 @@ yellLabel:setFontsize(30);
 yellLabel:setPivot(4);
 
 function onPlayerSpawn(event)
-    playersOnline[string.lower(event.player:getPlayerName())] = event.player:getPlayerID()
     event.player:addGuiElement(yellLabel)
     broadcastPlayerStatus(event.player, " joined the world")
     showWelcome(event.player);
@@ -29,14 +28,15 @@ function onPlayerSpawn(event)
 end
 
 function onPlayerConnect(event)
-    lastlog('connect', event.player)
+    playersOnline[string.lower(event.player:getPlayerName())] = { id=event.player:getPlayerID(), name=event.player:getPlayerName(), ip=event.player:getPlayerIP(), dbid=event.player:getPlayerDBID() }
+    lastlog{action='connect', po=event.player:getPlayerName()}
     broadcastPlayerStatus(event.player, " is connecting")
     -- I should be able to set value to event.player, but banning myself is throwing errors so no way to really test :(
     --- need a second account to really test this stuff.
 end
 
 function onPlayerDisconnect(event)
-    lastlog('disconnect', event.player)
+    lastlog{action='disconnect', po=event.player:getPlayerName()}
     -- TODO: compact the table
     playersOnline[string.lower(event.player:getPlayerName())] = nil
     broadcastPlayerStatus(event.player, " disconnected")
@@ -169,7 +169,7 @@ function showWelcome(player)
 end
 
 function setMotd(msg)
-    database:queryupdate("INSERT INTO motd (time, message) VALUES ("..os.time()..", '"..msg.."');");
+    database:queryupdate("INSERT INTO motd (time, message) VALUES (strftime('%s', 'now'), '"..msg.."');");
 end
 
 function showMotd()
@@ -197,7 +197,7 @@ function getLastText(opts)
     local last = Table.new()
 
     if not type(opts.name) ~= "string" then
-        result = database:query("SELECT * FROM `lastlog` WHERE `disconnect_at` > -1 ORDER BY `id` DESC LIMIT 5")
+        result = database:query("SELECT * FROM `lastlog` WHERE `disconnect_at` > -1 GROUP BY `name` ORDER BY `id` DESC LIMIT 5")
     else
         result = database:query("SELECT * FROM `lastlog` WHERE `name` LIKE '".. opts.name .."' AND `disconnect_at` > -1 ORDER BY `id` DESC LIMIT 5;")
     end
@@ -218,7 +218,7 @@ end
 
 -- checked on join
 function checkban(player)
-    local result = database:query("SELECT * FROM `banlist` WHERE `playername` = '".. player:getPlayerName() .."' AND (`applied_at` < 0 OR (`applied_at` + `duration`) > ".. os.time() .." OR `duration` < 0) COLLATE NOCASE;")
+    local result = database:query("SELECT * FROM `banlist` WHERE `playername` = '".. player:getPlayerName() .."' AND (`applied_at` < 0 OR (`applied_at` + `duration`) > strftime('%s', 'now') OR `duration` < 0) COLLATE NOCASE;")
     if result:next() then
 	duration = (result:getInt("duration") / 60)
 	reason = result:getString("reason")
@@ -232,7 +232,7 @@ function checkban(player)
 	message = message .." (".. reason ..")"
         broadcastPlayerStatus(player, message)
 	if result:getInt("applied_at") < 0 then
-	    database:queryupdate("UPDATE `banlist` SET `applied_at` = ".. os.time() .." WHERE `id` = ".. result:getString("id") ..";")
+	    database:queryupdate("UPDATE `banlist` SET `applied_at` = strftime('%s', 'now') WHERE `id` = ".. result:getString("id") ..";")
 	end
         setTimer(function() player:ban(reason, duration); end, 1, 1);
     end
@@ -248,7 +248,7 @@ end
 function ban(playername, duration, reason, adminPlayer)
     --- Queue ban for next login attempt
     if duration == 0 then duration = 1 end
-    database:queryupdate("INSERT INTO `banlist` (`playername`, `admin`, `serial`, `date`, `duration`, `reason`) VALUES ('".. playername .."', '".. adminPlayer:getPlayerName() .."', '', ".. os.time() ..", ".. (duration * 60) ..", '".. reason .."');")
+    database:queryupdate("INSERT INTO `banlist` (`playername`, `admin`, `serial`, `date`, `duration`, `reason`) VALUES ('".. playername .."', '".. adminPlayer:getPlayerName() .."', '', strftime('%s', 'now'), ".. (duration * 60) ..", '".. reason .."');")
 
     -- Ban immediately if online
     --- Don't use server:findPlayerByName because it's currently case sensitive
@@ -263,8 +263,8 @@ end
 function findOnlinePlayerByName(playername)
     local lname = string.lower(playername)
     if playersOnline[lname] then
-        if server:findPlayerByID(playersOnline[lname]) then
-            return server:findPlayerByID(playersOnline[i])
+        if server:findPlayerByID(playersOnline[lname].id) then
+            return server:findPlayerByID(playersOnline[lname].id)
         else
             -- actually shouldn't happen, see onPlayerDisconnect
             playersOnline[lname] = nil
@@ -272,12 +272,16 @@ function findOnlinePlayerByName(playername)
     end
 end
 
-function lastlog(action, player)
-    if action == "connect" then
-        database:queryupdate("INSERT INTO `lastlog` (`player_id`, `name`, `ip`, `connect_at`) VALUES (".. player:getPlayerDBID() ..", '".. player:getPlayerName() .."', '".. player:getPlayerIP() .."', ".. os.time() ..");")
+function lastlog(opts)
+    local query = ""
+    p = playersOnline[string.lower(opts.po)]
+    if opts.action == "connect" then
+        query = "INSERT INTO `lastlog` (`player_id`, `name`, `ip`, `connect_at`) VALUES (".. p.dbid ..", '".. p.name .."', '".. p.ip .."', strftime('%s', 'now'));"
     else
-        database:queryupdate("UPDATE `lastlog` SET `disconnect_at` = ".. os.time() .." WHERE `id` = (SELECT `id` FROM `lastlog` WHERE `ip` = '".. player:getPlayerIP() .."' ORDER BY `id` DESC LIMIT 1);")
+        query = "UPDATE `lastlog` SET `disconnect_at` = strftime('%s', 'now') WHERE `id` IN (SELECT `id` FROM `lastlog` WHERE `ip` = '".. p.ip .."' ORDER BY `id` DESC LIMIT 1);"
     end
+    print(timePrefix{text=query})
+    database:queryupdate(query)
 end
 
 addEvent("PlayerSpawn", onPlayerSpawn);
