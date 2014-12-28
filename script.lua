@@ -29,12 +29,14 @@ function onPlayerSpawn(event)
 end
 
 function onPlayerConnect(event)
+    lastlog('connect', event.player)
     broadcastPlayerStatus(event.player, " is connecting")
     -- I should be able to set value to event.player, but banning myself is throwing errors so no way to really test :(
     --- need a second account to really test this stuff.
 end
 
 function onPlayerDisconnect(event)
+    lastlog('disconnect', event.player)
     -- TODO: compact the table
     playersOnline[string.lower(event.player:getPlayerName())] = nil
     broadcastPlayerStatus(event.player, " disconnected")
@@ -64,6 +66,7 @@ function onPlayerCommand(event)
                 event.player:sendTextMessage("[#00FFCC]/setMotd [#00CC88]<message>");
                 event.player:sendTextMessage("[#00FFCC]/yell [#00CC88]<message>");
             end
+            event.player:sendTextMessage("[#00FFCC]/last [#00CC88][player]");
             event.player:sendTextMessage("[#00FFCC]/whisper [#00CC88]<player> <message>");
         elseif cmd[1] == "/ban" then
             if not event.player:isAdmin() then return msgAccessDenied(event.player) end
@@ -96,6 +99,9 @@ function onPlayerCommand(event)
             setTimer(function()
                     yellLabel:setVisible(false);
             end, 5, 1);
+        elseif cmd[1] == "/last" then
+            if not cmd[2] then cmd[2] = nil end
+	    sendTableMessage{player=event.player, messages=getLastText{name=cmd[2]}}
         elseif cmd[1] == "/whisper" then
             if not cmd[2] then return msgInvalidUsage(event.player) end
             local args = explode(" ", cmd[2], 2)
@@ -106,6 +112,12 @@ function onPlayerCommand(event)
     
             toPlayer:sendTextMessage(timePrefix{text="[#FFFF00](whisper) "..decoratePlayerName(event.player)..": "..args[2]});
         end
+    end
+end
+
+function sendTableMessage(opts)
+    for i=1,#opts.messages do
+        opts.player:sendTextMessage(opts.messages[i])
     end
 end
 
@@ -180,6 +192,30 @@ function timePrefix(opts)
     return os.date("%x %X", opts.time) .." ".. opts.text
 end
 
+function getLastText(opts)
+    local result = nil
+    local last = Table.new()
+
+    if not type(opts.name) ~= "string" then
+        result = database:query("SELECT * FROM `lastlog` WHERE `disconnect_at` > -1 ORDER BY `id` DESC LIMIT 5")
+    else
+        result = database:query("SELECT * FROM `lastlog` WHERE `name` LIKE '".. opts.name .."' AND `disconnect_at` > -1 ORDER BY `id` DESC LIMIT 5;")
+    end
+
+    while result:next() do
+        local offtime = result:getInt("disconnect_at")
+	if offtime == 0 then
+            offtime = "[#CC0000]Lost Connection"
+        else
+            offtime = os.date("%x %X", time)
+	end
+        last:insert("[#00FFCC]".. result:getString("name") .."[#00CC88] ".. os.date("%x %X", result:getInt("connect_at")) .." - ".. offtime)
+    end
+    result:close()
+
+    return last
+end
+
 -- checked on join
 function checkban(player)
     local result = database:query("SELECT * FROM `banlist` WHERE `playername` = '".. player:getPlayerName() .."' AND (`applied_at` < 0 OR (`applied_at` + `duration`) > ".. os.time() .." OR `duration` < 0) COLLATE NOCASE;")
@@ -236,6 +272,14 @@ function findOnlinePlayerByName(playername)
     end
 end
 
+function lastlog(action, player)
+    if action == "connect" then
+        database:queryupdate("INSERT INTO `lastlog` (`player_id`, `name`, `ip`, `connect_at`) VALUES (".. player:getPlayerDBID() ..", '".. player:getPlayerName() .."', '".. player:getPlayerIP() .."', ".. os.time() ..");")
+    else
+        database:queryupdate("UPDATE `lastlog` SET `disconnect_at` = ".. os.time() .." WHERE `id` = (SELECT `id` FROM `lastlog` WHERE `ip` = '".. player:getPlayerIP() .."' ORDER BY `id` DESC LIMIT 1);")
+    end
+end
+
 addEvent("PlayerSpawn", onPlayerSpawn);
 addEvent("PlayerConnect", onPlayerConnect);
 addEvent("PlayerDisconnect", onPlayerDisconnect);
@@ -249,6 +293,10 @@ function onEnable()
     database:queryupdate("CREATE TABLE IF NOT EXISTS `motd` (`ID` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `time` INTEGER, `message` VARCHAR);");
     database:queryupdate("CREATE TABLE IF NOT EXISTS `settings` (`key` PRIMARY KEY NOT NULL, `value` VARCHAR);");
     database:queryupdate("CREATE TABLE IF NOT EXISTS `banlist` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `playername` NOT NULL, `admin` VARCHAR, `serial` VARCHAR, `date` INTEGER NOT NULL, `duration` LONG DEFAULT -1, `reason` VARCHAR, `applied_at` BOOLEAN DEFAULT 0);");
+    database:queryupdate("CREATE TABLE IF NOT EXISTS `lastlog` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `player_id` INTEGER, `name` VARCHAR, `ip` VARCHAR, `connect_at` INTEGER, `disconnect_at` INTEGER DEFAULT -1)");
+
+    -- Cleanup lost connections (server crash)
+    database:queryupdate("UPDATE `lastlog` SET `disconnect_at` = 0 WHERE `disconnect_at` = -1")
 
     -- Broadcast motd every 60 minutes
     motd_timer = setTimer(function() showMotd(); end, 3600, -1);

@@ -36,3 +36,12 @@ function explode(sep, str, limit)
 
     return r, n
 end
+
+Table = {}
+Table.__index = table
+
+function Table.new()
+    local t = {}
+    setmetatable(t, Table)
+    return t
+end
