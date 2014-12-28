@@ -20,6 +20,7 @@ yellLabel:setFontsize(30);
 yellLabel:setPivot(4);
 
 function onPlayerSpawn(event)
+    playersOnline[string.lower(event.player:getPlayerName())] = event.player:getPlayerID()
     event.player:addGuiElement(yellLabel)
     broadcastPlayerStatus(event.player, " joined the world")
     showWelcome(event.player);
@@ -31,7 +32,6 @@ function onPlayerConnect(event)
     broadcastPlayerStatus(event.player, " is connecting")
     -- I should be able to set value to event.player, but banning myself is throwing errors so no way to really test :(
     --- need a second account to really test this stuff.
-    playersOnline[string.lower(event.player:getPlayerName())] = event.player:getPlayerID()
 end
 
 function onPlayerDisconnect(event)
@@ -137,6 +137,7 @@ end
 
 function broadcastPlayerStatus(player, msg)
     server:brodcastTextMessage(timePrefix{text="[#FFA500]** "..decoratePlayerName(player).." - "..msg})
+    print(timePrefix{text="** ".. player:getPlayerName() .." - ".. msg})
 end
 
 function sendMessage(msg, player)
