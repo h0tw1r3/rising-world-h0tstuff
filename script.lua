@@ -207,7 +207,7 @@ function getLastText(opts)
 	if offtime == 0 then
             offtime = "[#CC0000]Lost Connection"
         else
-            offtime = os.date("%x %X", time)
+            offtime = os.date("%x %X", offtime)
 	end
         last:insert("[#00FFCC]".. result:getString("name") .."[#00CC88] ".. os.date("%x %X", result:getInt("connect_at")) .." - ".. offtime)
     end
