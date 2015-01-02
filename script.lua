@@ -100,7 +100,6 @@ function onPlayerCommand(event)
                     yellLabel:setVisible(false);
             end, 5, 1);
         elseif cmd[1] == "/last" then
-            if not cmd[2] then cmd[2] = nil end
 	    sendTableMessage{player=event.player, messages=getLastText{name=cmd[2]}}
         elseif cmd[1] == "/whisper" then
             if not cmd[2] then return msgInvalidUsage(event.player) end
@@ -196,10 +195,10 @@ function getLastText(opts)
     local result = nil
     local last = Table.new()
 
-    if not type(opts.name) ~= "string" then
-        result = database:query("SELECT * FROM `lastlog` WHERE `disconnect_at` > -1 GROUP BY `name` ORDER BY `id` DESC LIMIT 5")
+    if type(opts.name) == "string" then
+        result = database:query("SELECT * FROM `lastlog` WHERE `name` LIKE '".. opts.name .."' AND `disconnect_at` > -1 ORDER BY `id` DESC LIMIT 10")
     else
-        result = database:query("SELECT * FROM `lastlog` WHERE `name` LIKE '".. opts.name .."' AND `disconnect_at` > -1 ORDER BY `id` DESC LIMIT 5;")
+        result = database:query("SELECT * FROM `lastlog` WHERE `disconnect_at` > -1 GROUP BY `name` ORDER BY `id` DESC LIMIT 10")
     end
 
     while result:next() do
